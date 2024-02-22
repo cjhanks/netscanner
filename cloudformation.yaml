@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  #------------------------------------------------------------------- #
+  # SQS Storage queue.
+  #------------------------------------------------------------------- #
+  IPQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: 'IPQueue'
+      DelaySeconds: 0
+      ReceiveMessageWaitTimeSeconds: 20
+      # 15 minutes
+      VisibilityTimeout: 1800
+
+  #------------------------------------------------------------------- #
+  # S3 Storage.
+  #------------------------------------------------------------------- #
+  IPGatherApplicationBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: ip-gather-application-bucket
+
+  #------------------------------------------------------------------- #
+  # Create an Instance Profile
+  #------------------------------------------------------------------- #
+  IPGatherInstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies: []
+
+  IPGatherInstanceRoleProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - Ref: IPGatherInstanceRole
+
+  #------------------------------------------------------------------- #
+  # Configure the VPC
+  #------------------------------------------------------------------- #
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '172.16.0.0/16'
+      Tags:
+        - Key: Name
+          Value: VPC
+
+
+  VPCSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: 'us-west-1a'
+      CidrBlock: '172.16.0.0/24'
+      Tags:
+        - Key: Name
+          Value: VPCSubnet1
+
+  VPCSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId:
+        Ref: VPC
+      AvailabilityZone: 'us-west-1c'
+      CidrBlock: '172.16.1.0/24'
+      Tags:
+        - Key: Name
+          Value: VPCSubnet2
+
+  VPCInternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    DependsOn: VPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: VPCInternetGateway
+
+  VPCInternetGatewayAttacher:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: VPCInternetGateway
+
+  VPCRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: VPCRouteTable
+
+  VPCRouteTablePublic:
+    Type: 'AWS::EC2::Route'
+    DependsOn: VPCInternetGatewayAttacher
+    Properties:
+      RouteTableId:
+        Ref: VPCRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: VPCInternetGateway
+
+  #------------------------------------------------------------------- #
+  # EC2 Instance Launching
+  #------------------------------------------------------------------- #
+  IPGatherInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: IPGatherInstanceSecurityGroup
+      GroupDescription: Security group for IP scrapers
+      VpcId:
+        Ref: VPC
+      Tags:
+        - Key: Name
+          Value: IPGatherInstanceSecurityGroup
+
+  IPGatherInstanceTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: 'IPGather'
+      LaunchTemplateData:
+        # Centos-9
+        ImageId: 'ami-0e2af9288c6d110db'
+        InstanceType: 't2.micro'
+        Monitoring:
+          Enabled: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+            Groups:
+              - Ref: IPGatherInstanceSecurityGroup
+        IamInstanceProfile:
+          Name:
+            Ref: IPGatherInstanceRoleProfile
+        InstanceMarketOptions:
+          MarketType: 'spot'
+          SpotOptions:
+            MaxPrice: .01
+
+  IpGatherAutoscaling:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      MinSize: 0
+      MaxSize: 20
+      DesiredCapacity: 0
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: IPGatherInstanceTemplate
+        Version:
+          Fn::GetAtt: IPGatherInstanceTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - Ref: VPCSubnet1
+        - Ref: VPCSubnet2
+
+  IpGatherAutoscalingRuleScaleUpPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: IpGatherAutoscaling
+      ScalingAdjustment: 1
+
+  IpGatherAutoscalingRuleScaleUpAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 5
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 1
+      Period: 60
+      AlarmActions:
+        - Ref: IpGatherAutoscalingRuleScaleUpPolicy
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - IPQueue
+              - QueueName
+
+  IpGatherAutoscalingRuleScaleDownPolicy:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: IpGatherAutoscaling
+      ScalingAdjustment: -5
+
+  IpGatherAutoscalingRuleScaleDownAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 15
+      Statistic: Maximum
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: IpGatherAutoscalingRuleScaleDownPolicy
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - IPQueue
+              - QueueName
+
+
