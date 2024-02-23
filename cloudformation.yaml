@@ -9,8 +9,8 @@ Resources:
       QueueName: 'IPQueue'
       DelaySeconds: 0
       ReceiveMessageWaitTimeSeconds: 20
-      # 15 minutes
-      VisibilityTimeout: 1800
+      # 1 hour.
+      VisibilityTimeout: 3600
 
   #------------------------------------------------------------------- #
   # S3 Storage.
@@ -35,7 +35,24 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Path: '/'
-      Policies: []
+      Policies:
+        # TODO:  Fix the Resource scopes here.
+        - PolicyName: 'SQS'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sqs:GetQueueAttributes'
+                  - 'sqs:GetQueueUrl'
+                  - 'sqs:ReceiveMessage'
+                  - 'sqs:DeleteMessage'
+                Resource: '*'
+
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                Resource: '*'
 
   IPGatherInstanceRoleProfile:
     Type: 'AWS::IAM::InstanceProfile'
@@ -54,7 +71,6 @@ Resources:
       Tags:
         - Key: Name
           Value: VPC
-
 
   VPCSubnet1:
     Type: 'AWS::EC2::Subnet'
@@ -113,6 +129,23 @@ Resources:
       GatewayId:
         Ref: VPCInternetGateway
 
+  VPCSubnet1RouteAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId:
+        Ref: VPCRouteTable
+      SubnetId:
+        Ref: VPCSubnet1
+
+  VPCSubnet2RouteAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId:
+        Ref: VPCRouteTable
+      SubnetId:
+        Ref: VPCSubnet2
+
+
   #------------------------------------------------------------------- #
   # EC2 Instance Launching
   #------------------------------------------------------------------- #
@@ -123,6 +156,14 @@ Resources:
       GroupDescription: Security group for IP scrapers
       VpcId:
         Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: IPGatherInstanceSecurityGroup
@@ -135,6 +176,7 @@ Resources:
         # Centos-9
         ImageId: 'ami-0e2af9288c6d110db'
         InstanceType: 't2.micro'
+        KeyName: 'zeek'
         Monitoring:
           Enabled: true
         NetworkInterfaces:
@@ -156,7 +198,7 @@ Resources:
     Properties:
       MinSize: 0
       MaxSize: 20
-      DesiredCapacity: 0
+      DesiredCapacity: 1
       LaunchTemplate:
         LaunchTemplateId:
           Ref: IPGatherInstanceTemplate
@@ -180,7 +222,7 @@ Resources:
       EvaluationPeriods: 5
       Statistic: Maximum
       ComparisonOperator: GreaterThanThreshold
-      Threshold: 1
+      Threshold: 0
       Period: 60
       AlarmActions:
         - Ref: IpGatherAutoscalingRuleScaleUpPolicy
@@ -204,7 +246,7 @@ Resources:
   IpGatherAutoscalingRuleScaleDownAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
-      EvaluationPeriods: 15
+      EvaluationPeriods: 90
       Statistic: Maximum
       ComparisonOperator: LessThanOrEqualToThreshold
       Threshold: 0
@@ -219,5 +261,4 @@ Resources:
             Fn::GetAtt:
               - IPQueue
               - QueueName
-
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64
 import json
 import yaml
 import boto3
@@ -13,19 +14,23 @@ def main(argv=None):
         required=True,
     )
     argp.add_argument(
-        '-c',
-        '--create',
-        action='store_true'
-    )
-    argp.add_argument(
         '-d',
         '--definition',
         type=str,
     )
     argp.add_argument(
+        '-C',
+        '--create',
+        action='store_true'
+    )
+    argp.add_argument(
         '-D',
         '--delete',
         action='store_true'
+    )
+    argp.add_argument(
+        '--pack',
+        action='append'
     )
 
     args = argp.parse_args(argv)
@@ -37,11 +42,26 @@ def main(argv=None):
         client.delete_stack(StackName=args.name)
         return 0
 
+
     with open(args.definition) as fp:
         data = yaml.load(fp)
-        body = json.dumps(data)
+
+    # Load any packs
+    for pack in args.pack:
+        (key, path) = pack.split('=', maxsplit=1)
+
+        with open(path, 'rb') as fp:
+            storage = base64.b64encode(fp.read()).decode('utf-8')
+
+        key_path = key.split('.')
+        node = data
+        for key in key_path[:-1]:
+            node = node[key]
+
+        node[key_path[-1]] = storage
 
     # -
+    body = json.dumps(data)
     kwargs = {
         'StackName': args.name,
         'TemplateBody': body,
