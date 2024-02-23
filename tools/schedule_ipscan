@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+
+import argparse
+import boto3
+import ipaddress
+import json
+
+def compute_storage_name(head, tail):
+    headlst = str(head).split('.')
+    taillst = str(tail).split('.')
+
+    new_headlst = []
+    for c in headlst:
+        new_headlst.append('%03d' % int(c))
+
+    new_taillst = []
+    for c in taillst:
+        new_taillst.append('%03d' % int(c))
+
+    return '.'.join(new_headlst) + '-' + '.'.join(new_taillst)
+
+def main(argv=None):
+    argp = argparse.ArgumentParser()
+    argp.add_argument(
+        '-m',
+        '--maximum',
+        default=150000
+    )
+    argp.add_argument(
+        '-q',
+        '--queue',
+        required=True
+    )
+    argp.add_argument(
+        '-s',
+        '--start',
+        required=True
+    )
+    argp.add_argument(
+        '-e',
+        '--end',
+        required=True
+    )
+    argp.add_argument(
+        '-b',
+        '--block-size',
+        type=int,
+        default=19
+    )
+
+    args = argp.parse_args(argv)
+    client = boto3.resource('sqs', region_name='us-west-1')
+    queue = client.get_queue_by_name(QueueName=args.queue)
+
+    head = int(ipaddress.ip_address(args.start))
+    tail = int(ipaddress.ip_address(args.end))
+    shft = 1 << (32 - args.block_size)
+
+    k = 0
+
+    entries = []
+    while head < tail:
+        import time
+        import random
+
+        ip_address_head = ipaddress.ip_address(head)
+        ip_address_tail = ipaddress.ip_address(head + shft)
+
+        head += shft
+
+        if ip_address_head.is_private:
+            continue
+        name = compute_storage_name(ip_address_head, ip_address_tail)
+        command = [
+            '--top-ports',
+                '25',
+            '{}/{}'.format(ip_address_head, args.block_size),
+            '-oX',
+                'output.xml'
+        ]
+        k += 1
+
+        entries.append({
+          'Id' : str(head),
+          'MessageBody': json.dumps({
+              's3bucket': 'ip-gather-application-bucket',
+              's3object': 'scans/{}.xml'.format(name),
+              'command' : '/usr/bin/nmap',
+              'argv'    : command,
+              'output'  : 'output.xml'
+          })
+        })
+
+        if len(entries) % 10 == 0:
+            queue.send_messages(Entries=entries)
+            entries = []
+
+    queue.send_messages(Entries=entries)
+    print(k)
+
+if __name__ == '__main__':
+    main()

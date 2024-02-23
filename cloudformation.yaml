@@ -1,52 +1,45 @@
 AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  # Centos9
+  ImageIdParam:
+    Description: 'AMI Image ID'
+    Type: String
+    Default: 'ami-0e2af9288c6d110db'
+
 Resources:
-  #------------------------------------------------------------------- #
+  #====================================================================#
   # SQS Storage queue.
-  #------------------------------------------------------------------- #
-  IPQueue:
+  #====================================================================#
+  QueueProcessASN:
     Type: 'AWS::SQS::Queue'
     Properties:
-      QueueName: 'IPQueue'
+      QueueName: 'QueueProcessASN'
       DelaySeconds: 0
       ReceiveMessageWaitTimeSeconds: 20
-      # 15 minutes
-      VisibilityTimeout: 1800
+      # 1 hour.
+      VisibilityTimeout: 3600
 
-  #------------------------------------------------------------------- #
+  QueueProcessCIDR:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: 'QueueProcessCIDR'
+      DelaySeconds: 0
+      ReceiveMessageWaitTimeSeconds: 20
+      # 1 hour.
+      VisibilityTimeout: 3600
+
+  #====================================================================#
   # S3 Storage.
-  #------------------------------------------------------------------- #
-  IPGatherApplicationBucket:
+  #====================================================================#
+  NetScannerBucket:
     Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: ip-gather-application-bucket
+      BucketName: netscanner
 
-  #------------------------------------------------------------------- #
-  # Create an Instance Profile
-  #------------------------------------------------------------------- #
-  IPGatherInstanceRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action:
-              - 'sts:AssumeRole'
-      Path: '/'
-      Policies: []
-
-  IPGatherInstanceRoleProfile:
-    Type: 'AWS::IAM::InstanceProfile'
-    Properties:
-      Path: '/'
-      Roles:
-        - Ref: IPGatherInstanceRole
-
-  #------------------------------------------------------------------- #
+  #====================================================================#
   # Configure the VPC
-  #------------------------------------------------------------------- #
+  #====================================================================#
+
   VPC:
     Type: 'AWS::EC2::VPC'
     Properties:
@@ -55,8 +48,11 @@ Resources:
         - Key: Name
           Value: VPC
 
+  #------------------------------------------------------------------- #
+  # Public Subnets
+  #------------------------------------------------------------------- #
 
-  VPCSubnet1:
+  VPCSubnet1Public:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
@@ -65,9 +61,9 @@ Resources:
       CidrBlock: '172.16.0.0/24'
       Tags:
         - Key: Name
-          Value: VPCSubnet1
+          Value: VPCSubnet1Public
 
-  VPCSubnet2:
+  VPCSubnet2Public:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId:
@@ -76,7 +72,15 @@ Resources:
       CidrBlock: '172.16.1.0/24'
       Tags:
         - Key: Name
-          Value: VPCSubnet2
+          Value: VPCSubnet2Public
+
+  #------------------------------------------------------------------- #
+  # Private Subnets
+  #------------------------------------------------------------------- #
+
+  #------------------------------------------------------------------- #
+  # Attaching the Internet Gateways.
+  #------------------------------------------------------------------- #
 
   VPCInternetGateway:
     Type: 'AWS::EC2::InternetGateway'
@@ -113,28 +117,180 @@ Resources:
       GatewayId:
         Ref: VPCInternetGateway
 
+  VPCSubnet1PublicRouteAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId:
+        Ref: VPCRouteTable
+      SubnetId:
+        Ref: VPCSubnet1Public
+
+  VPCSubnet2PublicRouteAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId:
+        Ref: VPCRouteTable
+      SubnetId:
+        Ref: VPCSubnet2Public
+
+  #====================================================================#
+  # IAM Management
+  #====================================================================#
   #------------------------------------------------------------------- #
-  # EC2 Instance Launching
+  # Roles
   #------------------------------------------------------------------- #
-  IPGatherInstanceSecurityGroup:
+  NetscanProcessASNRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+
+  NetscanProcessCIDRRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+
+  #------------------------------------------------------------------- #
+  # Policies
+  #------------------------------------------------------------------- #
+
+  NetscanS3Policy:
+      Type: 'AWS::IAM::Policy'
+      Properties:
+        PolicyName: NetscanS3Policy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 's3:GetObject'
+                - 's3:PutObject'
+                - 's3:ListBucket'
+              Resource:
+                - Fn::Join:
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - Ref: NetScannerBucket
+                    - '/*'
+                - Fn::Join:
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - Ref: NetScannerBucket
+        Roles:
+          - Ref: NetscanProcessASNRole
+          - Ref: NetscanProcessCIDRRole
+
+  NetscanQueueProcessASNPolicy:
+      Type: 'AWS::IAM::Policy'
+      Properties:
+        PolicyName: NetscanQueueProcessASNPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'sqs:GetQueueAttributes'
+                - 'sqs:GetQueueUrl'
+                - 'sqs:ReceiveMessage'
+                - 'sqs:DeleteMessage'
+                - 'sqs:SendMessage'
+              Resource:
+                Fn::GetAtt: QueueProcessASN.Arn
+        Roles:
+          - Ref: NetscanProcessASNRole
+
+  NetscanQueueProcessCIDRPolicy:
+      Type: 'AWS::IAM::Policy'
+      Properties:
+        PolicyName: NetscanQueueProcessCIDRPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'sqs:GetQueueAttributes'
+                - 'sqs:GetQueueUrl'
+                - 'sqs:SendMessage'
+                - 'sqs:ReceiveMessage'
+                - 'sqs:DeleteMessage'
+              Resource:
+                Fn::GetAtt: QueueProcessCIDR.Arn
+        Roles:
+          - Ref: NetscanProcessCIDRRole
+
+  #------------------------------------------------------------------- #
+  # Instance profiles.
+  #------------------------------------------------------------------- #
+
+  NetscanProcessCIDRInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - Ref: NetscanProcessCIDRRole
+
+  NetscanProcessASNInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: '/'
+      Roles:
+        - Ref: NetscanProcessASNRole
+
+  #====================================================================#
+  # EC2 Instance Specifications
+  #====================================================================#
+  #------------------------------------------------------------------- #
+  # Security group.
+  #------------------------------------------------------------------- #
+  NetscanPublicInstanceSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
-      GroupName: IPGatherInstanceSecurityGroup
+      GroupName: NetscanPublicInstanceSecurityGroup
       GroupDescription: Security group for IP scrapers
       VpcId:
         Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: IPGatherInstanceSecurityGroup
+          Value: NetscanPublicInstanceSecurityGroup
 
-  IPGatherInstanceTemplate:
+  #====================================================================#
+  # EC2 Launch Templates & Scaling
+  #====================================================================#
+  #------------------------------------------------------------------- #
+  # Launch template: CIDR Processing
+  #------------------------------------------------------------------- #
+  NetscanProcessCIDRInstanceTemplate:
     Type: 'AWS::EC2::LaunchTemplate'
     Properties:
-      LaunchTemplateName: 'IPGather'
+      LaunchTemplateName: 'NetscanProcessCIDR'
       LaunchTemplateData:
-        # Centos-9
-        ImageId: 'ami-0e2af9288c6d110db'
-        InstanceType: 't2.micro'
+        ImageId:
+          Ref: ImageIdParam
+        InstanceType: 't3.micro'
+        KeyName: 'zeek'
         Monitoring:
           Enabled: true
         NetworkInterfaces:
@@ -142,16 +298,181 @@ Resources:
             AssociatePublicIpAddress: true
             DeleteOnTermination: true
             Groups:
-              - Ref: IPGatherInstanceSecurityGroup
+              - Ref: NetscanPublicInstanceSecurityGroup
         IamInstanceProfile:
           Name:
-            Ref: IPGatherInstanceRoleProfile
+            Ref: NetscanProcessCIDRInstanceProfile
         InstanceMarketOptions:
           MarketType: 'spot'
           SpotOptions:
             MaxPrice: .01
 
-  IpGatherAutoscaling:
+  NetscanProcessCIDRAutoscalingSubnet1:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      MinSize: 0
+      MaxSize: 30
+      DesiredCapacity: 0
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: NetscanProcessCIDRInstanceTemplate
+        Version:
+          Fn::GetAtt: NetscanProcessCIDRInstanceTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - Ref: VPCSubnet1Public
+
+  NetscanProcessCIDRAutoscalingSubnet1ScaleUp:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet1
+      ScalingAdjustment: 2
+
+  NetscanProcessCIDRAutoscalingSubnet1ScaleUpAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 5
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet1ScaleUp
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  NetscanProcessCIDRAutoscalingSubnet1ScaleDown:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet1
+      ScalingAdjustment: -5
+
+  NetscanProcessCIDRAutoscalingSubnet1ScaleDownAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 90
+      Statistic: Maximum
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet1ScaleDown
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  NetscanProcessCIDRAutoscalingSubnet2:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      MinSize: 0
+      MaxSize: 30
+      DesiredCapacity: 0
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: NetscanProcessCIDRInstanceTemplate
+        Version:
+          Fn::GetAtt: NetscanProcessCIDRInstanceTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - Ref: VPCSubnet2Public
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleUp:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet2
+      ScalingAdjustment: 2
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleUpAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 5
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet2ScaleUp
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleDown:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet2
+      ScalingAdjustment: -5
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleDownAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 90
+      Statistic: Maximum
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet2ScaleDown
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  #------------------------------------------------------------------- #
+  # Launch template: ASN Processing
+  #------------------------------------------------------------------- #
+
+  NetscanProcessASNInstanceTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: 'NetscanProcessASN'
+      LaunchTemplateData:
+        ImageId:
+          Ref: ImageIdParam
+        InstanceType: 't2.large'
+        KeyName: 'zeek'
+        Monitoring:
+          Enabled: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+            Groups:
+              - Ref: NetscanPublicInstanceSecurityGroup
+        IamInstanceProfile:
+          Name:
+            Ref: NetscanProcessASNInstanceProfile
+        InstanceMarketOptions:
+          MarketType: 'spot'
+          SpotOptions:
+            MaxPrice: .05
+
+  NetscanProcessASNAutoscaling:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
       MinSize: 0
@@ -159,65 +480,65 @@ Resources:
       DesiredCapacity: 0
       LaunchTemplate:
         LaunchTemplateId:
-          Ref: IPGatherInstanceTemplate
+          Ref: NetscanProcessASNInstanceTemplate
         Version:
-          Fn::GetAtt: IPGatherInstanceTemplate.LatestVersionNumber
+          Fn::GetAtt: NetscanProcessASNInstanceTemplate.LatestVersionNumber
       VPCZoneIdentifier:
-        - Ref: VPCSubnet1
-        - Ref: VPCSubnet2
+        - Ref: VPCSubnet2Public
+        - Ref: VPCSubnet2Public
 
-  IpGatherAutoscalingRuleScaleUpPolicy:
+  NetscanProcessASNAutoscalingScaleUp:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: IpGatherAutoscaling
-      ScalingAdjustment: 1
+        Ref: NetscanProcessASNAutoscaling
+      ScalingAdjustment: 2
 
-  IpGatherAutoscalingRuleScaleUpAlarm:
+  NetscanProcessASNAutoscalingScaleUpAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       EvaluationPeriods: 5
       Statistic: Maximum
       ComparisonOperator: GreaterThanThreshold
-      Threshold: 1
+      Threshold: 0
       Period: 60
       AlarmActions:
-        - Ref: IpGatherAutoscalingRuleScaleUpPolicy
+        - Ref: NetscanProcessASNAutoscalingScaleUp
       Namespace: 'AWS/SQS'
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
         - Name: QueueName
           Value:
             Fn::GetAtt:
-              - IPQueue
+              - QueueProcessASN
               - QueueName
 
-  IpGatherAutoscalingRuleScaleDownPolicy:
+  NetscanProcessASNAutoscalingScaleDown:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: IpGatherAutoscaling
-      ScalingAdjustment: -5
+        Ref: NetscanProcessASNAutoscaling
+      ScalingAdjustment: -4
 
-  IpGatherAutoscalingRuleScaleDownAlarm:
+  NetscanProcessASNAutoscalingScaleDownAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
-      EvaluationPeriods: 15
+      EvaluationPeriods: 10
       Statistic: Maximum
       ComparisonOperator: LessThanOrEqualToThreshold
       Threshold: 0
       Period: 60
       AlarmActions:
-        - Ref: IpGatherAutoscalingRuleScaleDownPolicy
+        - Ref: NetscanProcessASNAutoscalingScaleDown
       Namespace: 'AWS/SQS'
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
         - Name: QueueName
           Value:
             Fn::GetAtt:
-              - IPQueue
+              - QueueProcessASN
               - QueueName
 
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=Enable IPScanner
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+PrivateTmp=yes
+WorkingDirectory=/tmp
+ExecStart=/opt/ipscan/asnscan
+
+[Install]
+WantedBy=multi-user.target

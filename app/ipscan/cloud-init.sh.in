@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -e
+set -x
+
+dnf update  -y
+dnf install -y \
+  python3     \
+  python3-pip \
+  nmap
+
+cd /tmp
+tail -n +$[ $(grep -n '^PAYLOAD' ${0} | cut -d ':' -f 1) + 1 ] ${0} \
+  | base64 -d > application.tar
+
+cd /
+tar -xzvf /tmp/application.tar ./
+
+# Add swap memory.
+dd if=/dev/zero of=/swap bs=1M count=2000
+mkswap /swap
+swapon /swap
+
+pip3 install -r /opt/ipscan/requirements.txt
+# -
+systemctl daemon-reload
+
+for i in {1..7}
+do
+  systemctl enable --now ipscan@${i}.service
+done
+
+exit 0
+
+PAYLOAD
