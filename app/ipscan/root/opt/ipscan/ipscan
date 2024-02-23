@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import subprocess
+import tempfile
+import threading
+import boto3
+
+
+def execute(msg):
+    s3_bucket = msg['s3bucket']
+    s3_object = msg['s3object']
+    output    = msg['output']
+    command   = msg['command']
+    argv      = msg['argv']
+
+    tempdir = tempfile.TemporaryDirectory()
+    rc = subprocess.call([command] + argv, cwd=tempdir.name)
+
+    sss = boto3.client('s3')
+    sss.upload_file(os.path.join(tempdir.name, output), s3_bucket, s3_object)
+
+def loop(args):
+    client = boto3.resource('sqs', region_name='us-west-1')
+    queue = client.get_queue_by_name(QueueName=args.queue)
+
+    while True:
+        for message in queue.receive_messages(MaxNumberOfMessages=1):
+            try:
+                execute(json.loads(message.body))
+            except Exception:
+                break
+
+            queue.delete_messages(Entries=[
+              {
+                'Id': message.message_id,
+                'ReceiptHandle': message.receipt_handle
+              }
+            ])
+
+def main(argv=None):
+    argp = argparse.ArgumentParser()
+    argp.add_argument(
+        '-q',
+        '--queue',
+        required=True
+    )
+
+    args = argp.parse_args()
+    threads = []
+    for _ in range(16):
+        thread = threading.Thread(target=loop, args=[args])
+        thread.start()
+        threads.append(thread)
+
+    for t in threads:
+        t.join()
+
+
+if __name__ == '__main__':
+    main()

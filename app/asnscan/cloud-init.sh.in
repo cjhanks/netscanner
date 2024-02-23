@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+set -x
+
+dnf update  -y
+dnf install -y \
+  python3     \
+  python3-pip \
+  whois       \
+  wget
+
+cd /tmp
+tail -n +$[ $(grep -n '^PAYLOAD' $0|cut -d ':' -f 1) + 1 ] ${0} \
+  | base64 -d > application.tar
+
+cd /
+tar -xzvf /tmp/application.tar ./
+
+# -
+systemctl daemon-reload
+systemctl enable --now asnscan.service
+
+exit 0
+
+PAYLOAD

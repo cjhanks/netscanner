@@ -1,0 +1,12 @@
+[Unit]
+Description=Enable IPScanner
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStartPre=/usr/bin/pip3 install -r /opt/ipscan/requirements.txt
+ExecStart=/opt/ipscan/executor -q IPQueue
+

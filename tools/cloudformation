@@ -6,6 +6,22 @@ import json
 import yaml
 import boto3
 
+def load_arg_pack(data, pack):
+    (key, path) = pack.split('=', maxsplit=1)
+
+    with open(path, 'rb') as fp:
+        storage = base64.b64encode(fp.read()).decode('utf-8')
+
+    key_path = key.split('.')
+    node = data
+    for key in key_path[:-1]:
+        if not key in node:
+            return
+        node = node[key]
+
+    node[key_path[-1]] = storage
+
+
 def main(argv=None):
     argp = argparse.ArgumentParser()
     argp.add_argument(
@@ -48,17 +64,7 @@ def main(argv=None):
 
     # Load any packs
     for pack in args.pack:
-        (key, path) = pack.split('=', maxsplit=1)
-
-        with open(path, 'rb') as fp:
-            storage = base64.b64encode(fp.read()).decode('utf-8')
-
-        key_path = key.split('.')
-        node = data
-        for key in key_path[:-1]:
-            node = node[key]
-
-        node[key_path[-1]] = storage
+        load_arg_pack(data, pack)
 
     # -
     body = json.dumps(data)
