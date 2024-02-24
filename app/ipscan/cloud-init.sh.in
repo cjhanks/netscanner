@@ -16,9 +16,15 @@ tail -n +$[ $(grep -n '^PAYLOAD' $0|cut -d ':' -f 1) + 1 ] ${0} \
 cd /
 tar -xzvf /tmp/application.tar ./
 
+pip3 install -r /opt/ipscan/requirements.txt
 # -
 systemctl daemon-reload
-systemctl enable --now ipscan.service
+
+for i in {1..16}
+do
+  systemctl enable --now ipscan@${i}.service
+done
+
 
 exit 0
 

@@ -7,36 +7,45 @@ import subprocess
 import boto3
 
 
-def execute_schedule(msg):
+def execute(msg):
     s3 = boto3.client('s3')
-    pass
 
-def execute_request(msg):
     s3bucket = msg['s3bucket']
     s3output = msg['s3output']
-    scanopts = msg['scanopts']
-    cidrspec = msg['cidrspec']
+    asn      = msg['asn']
 
-    output  = 'output.xml'
-    if os.path.exists(output):
-        os.unlink(output)
+    # Compute the whois solution for this.
+    whois_result = subprocess.check_output([
+        '/usr/bin/whois',
+            '-h',
+                'jwhois.apnic.net',
+            'AS%d' % asn
+    ])
 
-    command = [
-        '/usr/bin/nmap',
-            scanopts,
-            cidrspec,
-            '-oX',
-                'output.xml',
-    ]
-    rc = subprocess.call(command, cwd=tempdir.name)
-
-    s3 = boto3.client('s3')
-    s3.upload_file(
-        output,
-        s3bucket,
-        s3output
+    path = os.path.join(s3output, 'ASN', '%06d' % asn, 'ASN.txt')
+    s3.put_object(
+        Bucket=s3bucket,
+        Key=path,
+        Body=whois_result
     )
-    os.unlink(output)
+
+    # Compute the prefixes list.
+    path = os.path.join(s3output, 'ASN', '%06d' % asn, 'prefixes.yml')
+    subprocess.check_call([
+        '/usr/bin/bgpalerter-linux-x64',
+            'generate',
+            '-a',
+                str(asn),
+            '-o',
+                'prefixes.yml'
+    ])
+
+    s3.upload_file(
+        'prefixes.yml',
+        s3bucket,
+        path
+    )
+
 
 def loop(args):
     client = boto3.resource('sqs', region_name='us-west-1')
@@ -45,12 +54,6 @@ def loop(args):
     while True:
         for message in queue.receive_messages(MaxNumberOfMessages=1):
             body = json.loads(message.body)
-
-            if body['type'] == 'IPScan-Request':
-                execute_request(body)
-
-            if body['type'] == 'IPScan-Schedule':
-                execute_schedule(body)
 
             queue.delete_messages(Entries=[{
                 'Id': message.message_id,
@@ -62,12 +65,11 @@ def main(argv=None):
     argp.add_argument(
         '-q',
         '--queue',
-        default='QueueProcessCIDR'
+        default='QueueProcessASN'
     )
 
     args = argp.parse_args()
     loop(args)
-
 
 if __name__ == '__main__':
     main()

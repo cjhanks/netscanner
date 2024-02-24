@@ -7,6 +7,9 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-ExecStartPre=/usr/bin/pip3 install -r /opt/ipscan/requirements.txt
-ExecStart=/opt/ipscan/executor -q IPQueue
+PrivateTmp=yes
+WorkingDirectory=/tmp
+ExecStart=/opt/ipscan/asnscan
 
+[Install]
+WantedBy=multi-user.target

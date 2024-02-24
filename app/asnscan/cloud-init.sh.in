@@ -17,9 +17,17 @@ tail -n +$[ $(grep -n '^PAYLOAD' $0|cut -d ':' -f 1) + 1 ] ${0} \
 cd /
 tar -xzvf /tmp/application.tar ./
 
+wget https://github.com/nttgin/BGPalerter/releases/latest/download/bgpalerter-linux-x64
+chmod +x bgpalerter-linux-x64
+mv bgpalerter-linux-x64 /usr/bin/
+
+pip3 install -r /opt/ipscan/requirements.txt
 # -
 systemctl daemon-reload
-systemctl enable --now asnscan.service
+for i in {1..2}
+do
+  systemctl enable --now asnscan@${i}.service
+done
 
 exit 0
 

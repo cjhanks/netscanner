@@ -64,6 +64,7 @@ def main(argv=None):
 
     # Load any packs
     for pack in args.pack:
+        print(pack)
         load_arg_pack(data, pack)
 
     # -
