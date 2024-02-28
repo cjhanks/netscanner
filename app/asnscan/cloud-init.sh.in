@@ -21,10 +21,14 @@ wget https://github.com/nttgin/BGPalerter/releases/latest/download/bgpalerter-li
 chmod +x bgpalerter-linux-x64
 mv bgpalerter-linux-x64 /usr/bin/
 
+dd if=/dev/zero of=/swap bs=1M count=2000
+mkswap /swap
+swapon /swap
+
 pip3 install -r /opt/ipscan/requirements.txt
 # -
 systemctl daemon-reload
-for i in {1..2}
+for i in {1..8}
 do
   systemctl enable --now asnscan@${i}.service
 done

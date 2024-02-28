@@ -22,6 +22,11 @@ def compute_storage_name(head, tail):
 def main(argv=None):
     argp = argparse.ArgumentParser()
     argp.add_argument(
+        '-m',
+        '--maximum',
+        default=150000
+    )
+    argp.add_argument(
         '-q',
         '--queue',
         required=True
@@ -43,7 +48,7 @@ def main(argv=None):
         default=19
     )
 
-    args = argp.parse_args()
+    args = argp.parse_args(argv)
     client = boto3.resource('sqs', region_name='us-west-1')
     queue = client.get_queue_by_name(QueueName=args.queue)
 

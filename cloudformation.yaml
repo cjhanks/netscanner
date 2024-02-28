@@ -225,6 +225,7 @@ Resources:
               Action:
                 - 'sqs:GetQueueAttributes'
                 - 'sqs:GetQueueUrl'
+                - 'sqs:SendMessage'
                 - 'sqs:ReceiveMessage'
                 - 'sqs:DeleteMessage'
               Resource:
@@ -288,7 +289,7 @@ Resources:
       LaunchTemplateData:
         ImageId:
           Ref: ImageIdParam
-        InstanceType: 't2.micro'
+        InstanceType: 't3.micro'
         KeyName: 'zeek'
         Monitoring:
           Enabled: true
@@ -306,11 +307,11 @@ Resources:
           SpotOptions:
             MaxPrice: .01
 
-  NetscanProcessCIDRAutoscaling:
+  NetscanProcessCIDRAutoscalingSubnet1:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
       MinSize: 0
-      MaxSize: 20
+      MaxSize: 30
       DesiredCapacity: 0
       LaunchTemplate:
         LaunchTemplateId:
@@ -319,17 +320,16 @@ Resources:
           Fn::GetAtt: NetscanProcessCIDRInstanceTemplate.LatestVersionNumber
       VPCZoneIdentifier:
         - Ref: VPCSubnet1Public
-        - Ref: VPCSubnet2Public
 
-  NetscanProcessCIDRAutoscalingScaleUp:
+  NetscanProcessCIDRAutoscalingSubnet1ScaleUp:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: NetscanProcessCIDRAutoscaling
-      ScalingAdjustment: 1
+        Ref: NetscanProcessCIDRAutoscalingSubnet1
+      ScalingAdjustment: 2
 
-  NetscanProcessCIDRAutoscalingScaleUpAlarm:
+  NetscanProcessCIDRAutoscalingSubnet1ScaleUpAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       EvaluationPeriods: 5
@@ -338,7 +338,7 @@ Resources:
       Threshold: 0
       Period: 60
       AlarmActions:
-        - Ref: NetscanProcessCIDRAutoscalingScaleUp
+        - Ref: NetscanProcessCIDRAutoscalingSubnet1ScaleUp
       Namespace: 'AWS/SQS'
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -348,15 +348,15 @@ Resources:
               - QueueProcessCIDR
               - QueueName
 
-  NetscanProcessCIDRAutoscalingScaleDown:
+  NetscanProcessCIDRAutoscalingSubnet1ScaleDown:
     Type: 'AWS::AutoScaling::ScalingPolicy'
     Properties:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
-        Ref: NetscanProcessCIDRAutoscaling
+        Ref: NetscanProcessCIDRAutoscalingSubnet1
       ScalingAdjustment: -5
 
-  NetscanProcessCIDRAutoscalingScaleDownAlarm:
+  NetscanProcessCIDRAutoscalingSubnet1ScaleDownAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
       EvaluationPeriods: 90
@@ -365,7 +365,75 @@ Resources:
       Threshold: 0
       Period: 60
       AlarmActions:
-        - Ref: NetscanProcessCIDRAutoscalingScaleDown
+        - Ref: NetscanProcessCIDRAutoscalingSubnet1ScaleDown
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  NetscanProcessCIDRAutoscalingSubnet2:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      MinSize: 0
+      MaxSize: 30
+      DesiredCapacity: 0
+      LaunchTemplate:
+        LaunchTemplateId:
+          Ref: NetscanProcessCIDRInstanceTemplate
+        Version:
+          Fn::GetAtt: NetscanProcessCIDRInstanceTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - Ref: VPCSubnet2Public
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleUp:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet2
+      ScalingAdjustment: 2
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleUpAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 5
+      Statistic: Maximum
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet2ScaleUp
+      Namespace: 'AWS/SQS'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value:
+            Fn::GetAtt:
+              - QueueProcessCIDR
+              - QueueName
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleDown:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: NetscanProcessCIDRAutoscalingSubnet2
+      ScalingAdjustment: -5
+
+  NetscanProcessCIDRAutoscalingSubnet2ScaleDownAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: 90
+      Statistic: Maximum
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Threshold: 0
+      Period: 60
+      AlarmActions:
+        - Ref: NetscanProcessCIDRAutoscalingSubnet2ScaleDown
       Namespace: 'AWS/SQS'
       MetricName: ApproximateNumberOfMessagesVisible
       Dimensions:
@@ -408,7 +476,7 @@ Resources:
     Type: 'AWS::AutoScaling::AutoScalingGroup'
     Properties:
       MinSize: 0
-      MaxSize: 4
+      MaxSize: 20
       DesiredCapacity: 0
       LaunchTemplate:
         LaunchTemplateId:
@@ -416,7 +484,7 @@ Resources:
         Version:
           Fn::GetAtt: NetscanProcessASNInstanceTemplate.LatestVersionNumber
       VPCZoneIdentifier:
-        - Ref: VPCSubnet1Public
+        - Ref: VPCSubnet2Public
         - Ref: VPCSubnet2Public
 
   NetscanProcessASNAutoscalingScaleUp:
@@ -425,7 +493,7 @@ Resources:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
         Ref: NetscanProcessASNAutoscaling
-      ScalingAdjustment: 1
+      ScalingAdjustment: 2
 
   NetscanProcessASNAutoscalingScaleUpAlarm:
     Type: 'AWS::CloudWatch::Alarm'
@@ -452,12 +520,12 @@ Resources:
       AdjustmentType: ChangeInCapacity
       AutoScalingGroupName:
         Ref: NetscanProcessASNAutoscaling
-      ScalingAdjustment: -5
+      ScalingAdjustment: -4
 
   NetscanProcessASNAutoscalingScaleDownAlarm:
     Type: 'AWS::CloudWatch::Alarm'
     Properties:
-      EvaluationPeriods: 90
+      EvaluationPeriods: 10
       Statistic: Maximum
       ComparisonOperator: LessThanOrEqualToThreshold
       Threshold: 0

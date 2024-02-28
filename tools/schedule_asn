@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+
+import argparse
+import boto3
+import json
+
+
+def main(argv=None):
+    argp = argparse.ArgumentParser()
+    argp.add_argument(
+        '-q',
+        '--queue',
+        default='QueueProcessASN',
+    )
+    argp.add_argument(
+        '-B',
+        '--s3-bucket',
+        default='netscanner',
+    )
+    argp.add_argument(
+        '-P',
+        '--s3-output',
+        default='',
+    )
+    argp.add_argument(
+        '-s',
+        '--asn-start',
+        default=1,
+        type=int,
+    )
+    argp.add_argument(
+        '-e',
+        '--asn-end',
+        default=401308,
+        type=int,
+    )
+
+    args = argp.parse_args(argv)
+
+    client = boto3.resource('sqs', region_name='us-west-1')
+    queue = client.get_queue_by_name(QueueName=args.queue)
+
+    asn = args.asn_start
+    entries = []
+    while asn <= args.asn_end:
+        body = {
+            's3bucket': args.s3_bucket,
+            's3output': args.s3_output,
+            'asn'     : asn
+        }
+
+        print(body)
+
+        entries.append({
+            'Id': str(asn),
+            'MessageBody': json.dumps(body)
+        })
+
+        if len(entries) % 10 == 0:
+            queue.send_messages(Entries=entries)
+            entries = []
+
+        asn += 1
+
+    queue.send_messages(Entries=entries)
+
+if __name__ == '__main__':
+    main()

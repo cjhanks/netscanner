@@ -15,12 +15,14 @@ def execute(msg):
     asn      = msg['asn']
 
     # Compute the whois solution for this.
-    whois_result = subprocess.check_output([
+    proc = subprocess.run([
         '/usr/bin/whois',
             '-h',
                 'jwhois.apnic.net',
             'AS%d' % asn
-    ])
+    ],
+    capture_output=True)
+    whois_result = proc.stdout
 
     path = os.path.join(s3output, 'ASN', '%06d' % asn, 'ASN.txt')
     s3.put_object(
@@ -40,6 +42,7 @@ def execute(msg):
                 'prefixes.yml'
     ])
 
+    print('UPLOAD')
     s3.upload_file(
         'prefixes.yml',
         s3bucket,
@@ -54,6 +57,7 @@ def loop(args):
     while True:
         for message in queue.receive_messages(MaxNumberOfMessages=1):
             body = json.loads(message.body)
+            execute(body)
 
             queue.delete_messages(Entries=[{
                 'Id': message.message_id,
@@ -63,13 +67,26 @@ def loop(args):
 def main(argv=None):
     argp = argparse.ArgumentParser()
     argp.add_argument(
+        '-a',
+        '--asn',
+        type=int,
+        default=0
+    )
+    argp.add_argument(
         '-q',
         '--queue',
         default='QueueProcessASN'
     )
 
     args = argp.parse_args()
-    loop(args)
+    if args.asn:
+        execute({
+            's3bucket': 'netscanner',
+            's3output': '',
+            'asn'     : args.asn
+        })
+    else:
+        loop(args)
 
 if __name__ == '__main__':
     main()

@@ -3,40 +3,54 @@
 import argparse
 import json
 import os
+import random
 import subprocess
 import boto3
 
 
-def execute_schedule(msg):
-    s3 = boto3.client('s3')
-    pass
-
-def execute_request(msg):
+def execute_request(queue_name, msg):
     s3bucket = msg['s3bucket']
-    s3output = msg['s3output']
     scanopts = msg['scanopts']
-    cidrspec = msg['cidrspec']
+    job      = msg['jobs'][0]
+    s3output = os.path.join(msg['s3output'], 'ASN', job['asn'],
+                            '%s.xml' % (job['cidr'].replace('/', '_')
+    s3 = boto3.client('s3')
+    try:
+        s3.head_object(Bucket=s3bucket, Key=s3output)
+        return
+    except botocore.exceptions.ClientError as e:
+        pass
 
     output  = 'output.xml'
     if os.path.exists(output):
         os.unlink(output)
 
-    command = [
-        '/usr/bin/nmap',
-            scanopts,
-            cidrspec,
-            '-oX',
-                'output.xml',
-    ]
-    rc = subprocess.call(command, cwd=tempdir.name)
+    command = ['/usr/bin/nmap']
+    command.extend(scanopts)
+    command.extend([
+        job['cidr'],
+        '-oX',
+            'output.xml',
+    ])
+    rc = subprocess.call(command)
 
-    s3 = boto3.client('s3')
+
     s3.upload_file(
         output,
         s3bucket,
         s3output
     )
     os.unlink(output)
+
+    msg['jobs'].pop(0)
+    if msg['jobs']:
+        client = boto3.resource('sqs', region_name='us-west-1')
+        queue = client.get_queue_by_name(QueueName=queue_name)
+
+        queue.send_messages(Entries=[{
+            'Id': '%04d%s' % (random.randint(0, 9999), job['asn']),
+            'MessageBody': json.dumps(msg)
+        }])
 
 def loop(args):
     client = boto3.resource('sqs', region_name='us-west-1')
@@ -45,12 +59,7 @@ def loop(args):
     while True:
         for message in queue.receive_messages(MaxNumberOfMessages=1):
             body = json.loads(message.body)
-
-            if body['type'] == 'IPScan-Request':
-                execute_request(body)
-
-            if body['type'] == 'IPScan-Schedule':
-                execute_schedule(body)
+            execute_request(args.queue, body)
 
             queue.delete_messages(Entries=[{
                 'Id': message.message_id,
